@@ -2883,7 +2883,7 @@ class OccupancySensingTrait(_Trait):
         
         result = (
             domain == binary_sensor.DOMAIN
-            and device_class == binary_sensor.BinarySensorDeviceClass.OCCUPANCY
+            and device_class == binary_sensor.BinarySensorDeviceClass.PRESENCE
         )
         
         _LOGGER.debug("OccupancySensing.supported() result: %s", result)
