@@ -84,6 +84,7 @@ SUPPORTED_BINARY_SENSOR_DEVICE_CLASSES = {
     BinarySensorDeviceClass.GARAGE_DOOR,
     BinarySensorDeviceClass.LOCK,
     BinarySensorDeviceClass.MOTION,
+    BinarySensorDeviceClass.OCCUPANCY,
     BinarySensorDeviceClass.OPENING,
     BinarySensorDeviceClass.PRESENCE,
     BinarySensorDeviceClass.WINDOW,
