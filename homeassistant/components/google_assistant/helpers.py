@@ -509,11 +509,27 @@ def supported_traits_for_state(state: State) -> list[type[trait._Trait]]:
         return []
 
     device_class = state.attributes.get(ATTR_DEVICE_CLASS)
-    return [
+
+    # Debug logging for binary_sensor entities
+    if domain == "binary_sensor":
+        _LOGGER.debug(
+            "===== supported_traits_for_state: entity=%s, domain=%s, device_class=%s",
+            state.entity_id,
+            domain,
+            device_class,
+        )
+        _LOGGER.debug("===== Available TRAITS: %s", [t.name for t in trait.TRAITS])
+
+    result = [
         Trait
         for Trait in trait.TRAITS
         if Trait.supported(domain, features, device_class, attributes)
     ]
+
+    if domain == "binary_sensor":
+        _LOGGER.debug("===== Matched traits for %s: %s", state.entity_id, [t.name for t in result])
+
+    return result
 
 
 class GoogleEntity:
@@ -786,7 +802,18 @@ def async_get_google_entity_if_supported(
     """
     features: int | None = state.attributes.get(ATTR_SUPPORTED_FEATURES)
     entity = GoogleEntity(hass, config, state)
-    is_supported = bool(entity.traits())
+    traits_list = entity.traits()
+    is_supported = bool(traits_list)
+
+    # Debug logging for binary_sensor entities
+    if state.domain == "binary_sensor":
+        _LOGGER.debug(
+            "===== async_get_google_entity_if_supported: entity=%s, traits=%s, is_supported=%s",
+            state.entity_id,
+            [t.name for t in traits_list],
+            is_supported,
+        )
+
     config.is_supported_cache[state.entity_id] = (features, is_supported)
     return entity if is_supported else None
 
@@ -809,11 +836,24 @@ def async_get_entities(
         if result := is_supported_cache.get(entity_id):
             cached_features, supported = result
             if cached_features == features:
+                # Debug logging for binary_sensor cache hits
+                if state.domain == "binary_sensor":
+                    _LOGGER.debug(
+                        "===== async_get_entities CACHE HIT: entity=%s, supported=%s (cached)",
+                        entity_id,
+                        supported,
+                    )
                 if supported:
                     entities.append(GoogleEntity(hass, config, state))
                 continue
             # Cached features don't match, fall through to check
             # if the entity is supported and update the cache.
+        # Debug logging for binary_sensor cache misses
+        if state.domain == "binary_sensor":
+            _LOGGER.debug(
+                "===== async_get_entities CACHE MISS: entity=%s, checking support...",
+                entity_id,
+            )
         if entity := async_get_google_entity_if_supported(hass, config, state):
             entities.append(entity)
     return entities
