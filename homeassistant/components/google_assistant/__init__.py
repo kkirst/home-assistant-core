@@ -38,7 +38,7 @@ from .http import GoogleAssistantView, GoogleConfig
 from .const import EVENT_COMMAND_RECEIVED, EVENT_SYNC_RECEIVED  # noqa: F401, isort:skip
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.error("===== CUSTOM GOOGLE_ASSISTANT __INIT__ LOADED =====")
+_LOGGER.debug("===== CUSTOM GOOGLE_ASSISTANT __INIT__ LOADED =====")
 
 CONF_ALLOW_UNLOCK = "allow_unlock"
 

@@ -105,6 +105,7 @@ from .const import (
 from .error import ChallengeNeeded, SmartHomeError
 
 _LOGGER = logging.getLogger(__name__)
+_LOGGER.debug("===== CUSTOM GOOGLE_ASSISTANT TRAIT LOADED =====")
 
 PREFIX_TRAITS = "action.devices.traits."
 TRAIT_ARM_DISARM = f"{PREFIX_TRAITS}ArmDisarm"
@@ -2874,17 +2875,29 @@ class OccupancySensingTrait(_Trait):
     @staticmethod
     def supported(domain, features, device_class, _):
         """Test if state is supported."""
-        return (
+        _LOGGER.debug(
+            "OccupancySensing.supported() called: domain=%s, device_class=%s",
+            domain,
+            device_class,
+        )
+        
+        result = (
             domain == binary_sensor.DOMAIN
             and device_class == binary_sensor.BinarySensorDeviceClass.OCCUPANCY
         )
+        
+        _LOGGER.debug("OccupancySensing.supported() result: %s", result)
+        return result
 
     def sync_attributes(self) -> dict[str, Any]:
         """Return OccupancySensing attributes for a sync request."""
+        _LOGGER.debug("OccupancySensing.sync_attributes() called")
         return {"occupancySensorConfiguration": [{"occupancySensorType": "ULTRASONIC"}]}
 
     def query_attributes(self) -> dict[str, Any]:
         """Return OccupancySensing query attributes."""
+        _LOGGER.debug("OccupancySensing.query_attributes() called, state=%s", self.state.state)
         if self.state.state == STATE_ON:
             return {"occupancy": "OCCUPIED"}
         return {"occupancy": "UNOCCUPIED"}
+_LOGGER.debug("OccupancySensingTrait registered: %s", OccupancySensingTrait)
