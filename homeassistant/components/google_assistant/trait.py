@@ -120,6 +120,7 @@ TRAIT_INPUT_SELECTOR = f"{PREFIX_TRAITS}InputSelector"
 TRAIT_LOCATOR = f"{PREFIX_TRAITS}Locator"
 TRAIT_LOCK_UNLOCK = f"{PREFIX_TRAITS}LockUnlock"
 TRAIT_MEDIA_STATE = f"{PREFIX_TRAITS}MediaState"
+TRAIT_OCCUPANCY_SENSING = f"{PREFIX_TRAITS}OccupancySensing"
 TRAIT_MODES = f"{PREFIX_TRAITS}Modes"
 TRAIT_OBJECT_DETECTION = f"{PREFIX_TRAITS}ObjectDetection"
 TRAIT_ON_OFF = f"{PREFIX_TRAITS}OnOff"
@@ -2858,3 +2859,32 @@ class SensorStateTrait(_Trait):
         return create_sensor_state(
             binary_sensor_data[0], current_state=binary_sensor_data[1][value]
         )
+
+
+@register_trait
+class OccupancySensingTrait(_Trait):
+    """Trait for OccupancySensing (query-only).
+
+    https://developers.home.google.com/cloud-to-cloud/traits/occupancysensing
+    """
+
+    name = TRAIT_OCCUPANCY_SENSING
+    commands: list[str] = []
+
+    @staticmethod
+    def supported(domain, features, device_class, _):
+        """Test if state is supported."""
+        return (
+            domain == binary_sensor.DOMAIN
+            and device_class == binary_sensor.BinarySensorDeviceClass.OCCUPANCY
+        )
+
+    def sync_attributes(self) -> dict[str, Any]:
+        """Return OccupancySensing attributes for a sync request."""
+        return {"occupancySensorConfiguration": [{"occupancySensorType": "ULTRASONIC"}]}
+
+    def query_attributes(self) -> dict[str, Any]:
+        """Return OccupancySensing query attributes."""
+        if self.state.state == STATE_ON:
+            return {"occupancy": "OCCUPIED"}
+        return {"occupancy": "UNOCCUPIED"}

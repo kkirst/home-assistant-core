@@ -183,6 +183,10 @@ DEVICE_CLASS_TO_GOOGLE_TYPES = {
         binary_sensor.DOMAIN,
         binary_sensor.BinarySensorDeviceClass.CO,
     ): TYPE_CARBON_MONOXIDE_DETECTOR,
+    (
+        binary_sensor.DOMAIN,
+        binary_sensor.BinarySensorDeviceClass.OCCUPANCY,
+    ): TYPE_SENSOR,
     (cover.DOMAIN, cover.CoverDeviceClass.AWNING): TYPE_AWNING,
     (cover.DOMAIN, cover.CoverDeviceClass.CURTAIN): TYPE_CURTAIN,
     (cover.DOMAIN, cover.CoverDeviceClass.DOOR): TYPE_DOOR,
