@@ -26,7 +26,7 @@ from homeassistant.components.alexa import (
     entities as alexa_entities,
     errors as alexa_errors,
 )
-from homeassistant.components.google_assistant import helpers as google_helpers
+from custom_components.google_assistant import helpers as google_helpers
 from homeassistant.components.homeassistant import exposed_entities
 from homeassistant.components.http import KEY_HASS, HomeAssistantView, require_admin
 from homeassistant.components.http.data_validator import RequestDataValidator
