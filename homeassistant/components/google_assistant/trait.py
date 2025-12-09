@@ -1013,8 +1013,9 @@ class TemperatureControlTrait(_Trait):
     """Trait for devices (other than thermostats) that support controlling temperature.
 
     Control the target temperature of water heaters.
-    Offers a workaround for Temperature sensors by setting queryOnlyTemperatureControl
-    in the response.
+
+    Note: Temperature sensors use TemperatureSettingTrait instead, which allows them
+    to be grouped with climate devices in Google Home.
 
     https://developers.google.com/assistant/smarthome/traits/temperaturecontrol
     """
@@ -1028,99 +1029,72 @@ class TemperatureControlTrait(_Trait):
     @staticmethod
     def supported(domain, features, device_class, _):
         """Test if state is supported."""
+        # Temperature sensors now use TemperatureSettingTrait for climate grouping
         return (
             domain == water_heater.DOMAIN
             and features & WaterHeaterEntityFeature.TARGET_TEMPERATURE
-        ) or (
-            domain == sensor.DOMAIN
-            and device_class == sensor.SensorDeviceClass.TEMPERATURE
         )
 
     def sync_attributes(self) -> dict[str, Any]:
         """Return temperature attributes for a sync request."""
         response = {}
-        domain = self.state.domain
         attrs = self.state.attributes
         unit = self.hass.config.units.temperature_unit
         response["temperatureUnitForUX"] = _google_temp_unit(unit)
 
-        if domain == water_heater.DOMAIN:
-            min_temp = round(
-                TemperatureConverter.convert(
-                    float(attrs[water_heater.ATTR_MIN_TEMP]),
-                    unit,
-                    UnitOfTemperature.CELSIUS,
-                )
+        min_temp = round(
+            TemperatureConverter.convert(
+                float(attrs[water_heater.ATTR_MIN_TEMP]),
+                unit,
+                UnitOfTemperature.CELSIUS,
             )
-            max_temp = round(
-                TemperatureConverter.convert(
-                    float(attrs[water_heater.ATTR_MAX_TEMP]),
-                    unit,
-                    UnitOfTemperature.CELSIUS,
-                )
+        )
+        max_temp = round(
+            TemperatureConverter.convert(
+                float(attrs[water_heater.ATTR_MAX_TEMP]),
+                unit,
+                UnitOfTemperature.CELSIUS,
             )
-            response["temperatureRange"] = {
-                "minThresholdCelsius": min_temp,
-                "maxThresholdCelsius": max_temp,
-            }
-        else:
-            response["queryOnlyTemperatureControl"] = True
-            response["temperatureRange"] = {
-                "minThresholdCelsius": -100,
-                "maxThresholdCelsius": 100,
-            }
+        )
+        response["temperatureRange"] = {
+            "minThresholdCelsius": min_temp,
+            "maxThresholdCelsius": max_temp,
+        }
 
         return response
 
     def query_attributes(self) -> dict[str, Any]:
         """Return temperature states."""
         response = {}
-        domain = self.state.domain
         unit = self.hass.config.units.temperature_unit
-        if domain == water_heater.DOMAIN:
-            target_temp = self.state.attributes[water_heater.ATTR_TEMPERATURE]
-            current_temp = self.state.attributes[water_heater.ATTR_CURRENT_TEMPERATURE]
-            if target_temp not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                response["temperatureSetpointCelsius"] = round(
-                    TemperatureConverter.convert(
-                        float(target_temp),
-                        unit,
-                        UnitOfTemperature.CELSIUS,
-                    ),
-                    1,
-                )
-            if current_temp is not None:
-                response["temperatureAmbientCelsius"] = round(
-                    TemperatureConverter.convert(
-                        float(current_temp),
-                        unit,
-                        UnitOfTemperature.CELSIUS,
-                    ),
-                    1,
-                )
-            return response
-
-        # domain == sensor.DOMAIN
-        current_temp = self.state.state
-        if current_temp not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            temp = round(
+        target_temp = self.state.attributes[water_heater.ATTR_TEMPERATURE]
+        current_temp = self.state.attributes[water_heater.ATTR_CURRENT_TEMPERATURE]
+        if target_temp not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            response["temperatureSetpointCelsius"] = round(
                 TemperatureConverter.convert(
-                    float(current_temp), unit, UnitOfTemperature.CELSIUS
+                    float(target_temp),
+                    unit,
+                    UnitOfTemperature.CELSIUS,
                 ),
                 1,
             )
-            response["temperatureSetpointCelsius"] = temp
-            response["temperatureAmbientCelsius"] = temp
-
+        if current_temp is not None:
+            response["temperatureAmbientCelsius"] = round(
+                TemperatureConverter.convert(
+                    float(current_temp),
+                    unit,
+                    UnitOfTemperature.CELSIUS,
+                ),
+                1,
+            )
         return response
 
     async def execute(self, command, data, params, challenge):
         """Execute a temperature point or mode command."""
         # All sent in temperatures are always in Celsius
-        domain = self.state.domain
         unit = self.hass.config.units.temperature_unit
 
-        if domain == water_heater.DOMAIN and command == COMMAND_SET_TEMPERATURE:
+        if command == COMMAND_SET_TEMPERATURE:
             min_temp = self.state.attributes[water_heater.ATTR_MIN_TEMP]
             max_temp = self.state.attributes[water_heater.ATTR_MAX_TEMP]
             temp = TemperatureConverter.convert(
@@ -1143,7 +1117,7 @@ class TemperatureControlTrait(_Trait):
             )
             return
 
-        raise SmartHomeError(ERR_NOT_SUPPORTED, f"Execute is not supported by {domain}")
+        raise SmartHomeError(ERR_NOT_SUPPORTED, f"Command {command} is not supported")
 
 
 @register_trait
@@ -1178,7 +1152,12 @@ class TemperatureSettingTrait(_Trait):
     @staticmethod
     def supported(domain, features, device_class, _):
         """Test if state is supported."""
-        return domain == climate.DOMAIN
+        if domain == climate.DOMAIN:
+            return True
+        # Support temperature sensors as read-only climate sensors
+        if domain == sensor.DOMAIN and device_class == sensor.SensorDeviceClass.TEMPERATURE:
+            return True
+        return False
 
     @property
     def climate_google_modes(self):
@@ -1201,10 +1180,23 @@ class TemperatureSettingTrait(_Trait):
     def sync_attributes(self) -> dict[str, Any]:
         """Return temperature point and modes attributes for a sync request."""
         response = {}
-        attrs = self.state.attributes
+        domain = self.state.domain
         unit = self.hass.config.units.temperature_unit
         response["thermostatTemperatureUnit"] = _google_temp_unit(unit)
 
+        # Handle temperature sensors as read-only climate sensors
+        if domain == sensor.DOMAIN:
+            response["queryOnlyTemperatureSetting"] = True
+            response["thermostatTemperatureRange"] = {
+                "minThresholdCelsius": -100,
+                "maxThresholdCelsius": 100,
+            }
+            # Sensors don't have modes, but Google requires at least one
+            response["availableThermostatModes"] = ["off"]
+            return response
+
+        # Handle climate entities (thermostats)
+        attrs = self.state.attributes
         min_temp = round(
             TemperatureConverter.convert(
                 float(attrs[climate.ATTR_MIN_TEMP]),
@@ -1244,9 +1236,24 @@ class TemperatureSettingTrait(_Trait):
     def query_attributes(self) -> dict[str, Any]:
         """Return temperature point and modes query attributes."""
         response: dict[str, Any] = {}
-        attrs = self.state.attributes
+        domain = self.state.domain
         unit = self.hass.config.units.temperature_unit
 
+        # Handle temperature sensors - just report ambient temperature
+        if domain == sensor.DOMAIN:
+            current_temp = self.state.state
+            if current_temp not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                response["thermostatTemperatureAmbient"] = round(
+                    TemperatureConverter.convert(
+                        float(current_temp), unit, UnitOfTemperature.CELSIUS
+                    ),
+                    1,
+                )
+            response["thermostatMode"] = "off"
+            return response
+
+        # Handle climate entities (thermostats)
+        attrs = self.state.attributes
         operation = self.state.state
         preset = attrs.get(climate.ATTR_PRESET_MODE)
         supported = attrs.get(ATTR_SUPPORTED_FEATURES, 0)
@@ -1308,6 +1315,13 @@ class TemperatureSettingTrait(_Trait):
 
     async def execute(self, command, data, params, challenge):
         """Execute a temperature point or mode command."""
+        # Temperature sensors are read-only
+        if self.state.domain == sensor.DOMAIN:
+            raise SmartHomeError(
+                ERR_NOT_SUPPORTED,
+                "Temperature sensors are read-only",
+            )
+
         # All sent in temperatures are always in Celsius
         unit = self.hass.config.units.temperature_unit
         min_temp = self.state.attributes[climate.ATTR_MIN_TEMP]
