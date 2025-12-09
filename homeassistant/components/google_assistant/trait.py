@@ -94,8 +94,10 @@ from .const import (
     ERR_ALREADY_ARMED,
     ERR_ALREADY_DISARMED,
     ERR_ALREADY_STOPPED,
+    ERR_APP_LAUNCH_FAILED,
     ERR_CHALLENGE_NOT_SETUP,
     ERR_FUNCTION_NOT_SUPPORTED,
+    ERR_NO_AVAILABLE_APP,
     ERR_NO_AVAILABLE_CHANNEL,
     ERR_NOT_SUPPORTED,
     ERR_UNSUPPORTED_INPUT,
@@ -108,6 +110,7 @@ _LOGGER = logging.getLogger(__name__)
 _LOGGER.debug("===== CUSTOM GOOGLE_ASSISTANT TRAIT LOADED =====")
 
 PREFIX_TRAITS = "action.devices.traits."
+TRAIT_APP_SELECTOR = f"{PREFIX_TRAITS}AppSelector"
 TRAIT_ARM_DISARM = f"{PREFIX_TRAITS}ArmDisarm"
 TRAIT_BRIGHTNESS = f"{PREFIX_TRAITS}Brightness"
 TRAIT_CAMERA_STREAM = f"{PREFIX_TRAITS}CameraStream"
@@ -136,6 +139,9 @@ TRAIT_VOLUME = f"{PREFIX_TRAITS}Volume"
 
 PREFIX_COMMANDS = "action.devices.commands."
 COMMAND_ACTIVATE_SCENE = f"{PREFIX_COMMANDS}ActivateScene"
+COMMAND_APP_INSTALL = f"{PREFIX_COMMANDS}appInstall"
+COMMAND_APP_SEARCH = f"{PREFIX_COMMANDS}appSearch"
+COMMAND_APP_SELECT = f"{PREFIX_COMMANDS}appSelect"
 COMMAND_ARM_DISARM = f"{PREFIX_COMMANDS}ArmDisarm"
 COMMAND_BRIGHTNESS_ABSOLUTE = f"{PREFIX_COMMANDS}BrightnessAbsolute"
 COMMAND_CHARGE = f"{PREFIX_COMMANDS}Charge"
@@ -2185,6 +2191,176 @@ class InputSelectorTrait(_Trait):
             blocking=not self.config.should_report_state,
             context=data.context,
         )
+
+
+# Custom attribute for app list - media players can expose this attribute
+# to provide a separate list of applications distinct from input sources
+ATTR_APP_LIST = "app_list"
+ATTR_APP_ID = "app_id"
+ATTR_APP_NAME = "app_name"
+
+
+@register_trait
+class AppSelectorTrait(_Trait):
+    """Trait to select applications on a media player.
+
+    https://developers.home.google.com/cloud-to-cloud/traits/appselector
+
+    This trait allows switching between applications on media devices.
+    Media players can expose an 'app_list' attribute containing available apps.
+    If 'app_list' is not available, falls back to 'source_list' for compatibility.
+
+    Note: This trait currently supports only en-US language per Google's documentation.
+    """
+
+    name = TRAIT_APP_SELECTOR
+    commands = [COMMAND_APP_SELECT, COMMAND_APP_INSTALL, COMMAND_APP_SEARCH]
+
+    @staticmethod
+    def supported(domain, features, device_class, attributes):
+        """Test if state is supported.
+
+        AppSelector is supported for media players that have either:
+        - An 'app_list' attribute (custom attribute for explicit app support)
+        - A 'source_list' attribute with SELECT_SOURCE feature (fallback)
+
+        The trait is primarily intended for TV and set-top box device classes.
+        """
+        if domain != media_player.DOMAIN:
+            return False
+
+        # Check if entity has explicit app_list attribute
+        if attributes.get(ATTR_APP_LIST):
+            return True
+
+        # Fall back to source_list if device class is TV or receiver
+        # (these are most likely to have apps in their source list)
+        if device_class in (
+            media_player.MediaPlayerDeviceClass.TV,
+            media_player.MediaPlayerDeviceClass.RECEIVER,
+        ) and (features & MediaPlayerEntityFeature.SELECT_SOURCE):
+            return bool(attributes.get(media_player.ATTR_INPUT_SOURCE_LIST))
+
+        return False
+
+    def _get_app_list(self) -> list[str]:
+        """Get the list of available applications."""
+        attrs = self.state.attributes
+
+        # Prefer explicit app_list attribute
+        app_list = attrs.get(ATTR_APP_LIST)
+        if app_list:
+            return list(app_list)
+
+        # Fall back to source_list
+        return attrs.get(media_player.ATTR_INPUT_SOURCE_LIST) or []
+
+    def _get_current_app(self) -> str:
+        """Get the currently active application."""
+        attrs = self.state.attributes
+
+        # Prefer explicit app_id/app_name attributes
+        if app_id := attrs.get(ATTR_APP_ID):
+            return app_id
+        if app_name := attrs.get(ATTR_APP_NAME):
+            return app_name
+
+        # Fall back to current source
+        return attrs.get(media_player.ATTR_INPUT_SOURCE, "")
+
+    def sync_attributes(self) -> dict[str, Any]:
+        """Return app attributes for a sync request."""
+        app_list = self._get_app_list()
+
+        available_apps = [
+            {"key": app, "names": [{"name_synonym": [app], "lang": "en"}]}
+            for app in app_list
+        ]
+
+        return {"availableApplications": available_apps}
+
+    def query_attributes(self) -> dict[str, Any]:
+        """Return current application."""
+        return {"currentApplication": self._get_current_app()}
+
+    async def execute(self, command, data, params, challenge):
+        """Execute an app selection command."""
+        app_list = self._get_app_list()
+
+        if command == COMMAND_APP_SELECT:
+            # Google may send either newApplication (key) or newApplicationName (name)
+            requested_app = params.get("newApplication") or params.get(
+                "newApplicationName"
+            )
+
+            if not requested_app:
+                raise SmartHomeError(ERR_NO_AVAILABLE_APP, "No application specified")
+
+            # Find the app in our list (case-insensitive match)
+            matched_app = None
+            for app in app_list:
+                if app.lower() == requested_app.lower():
+                    matched_app = app
+                    break
+
+            if not matched_app:
+                raise SmartHomeError(
+                    ERR_NO_AVAILABLE_APP,
+                    f"Application {requested_app} is not available",
+                )
+
+            # Use select_source service to switch to the app
+            await self.hass.services.async_call(
+                media_player.DOMAIN,
+                media_player.SERVICE_SELECT_SOURCE,
+                {
+                    ATTR_ENTITY_ID: self.state.entity_id,
+                    media_player.ATTR_INPUT_SOURCE: matched_app,
+                },
+                blocking=not self.config.should_report_state,
+                context=data.context,
+            )
+
+        elif command == COMMAND_APP_SEARCH:
+            # App search - just try to select the app if found
+            requested_app = params.get("newApplication") or params.get(
+                "newApplicationName"
+            )
+
+            if not requested_app:
+                raise SmartHomeError(ERR_NO_AVAILABLE_APP, "No application specified")
+
+            # Find matching apps (partial match for search)
+            matched_app = None
+            for app in app_list:
+                if requested_app.lower() in app.lower():
+                    matched_app = app
+                    break
+
+            if not matched_app:
+                raise SmartHomeError(
+                    ERR_NO_AVAILABLE_APP,
+                    f"Application {requested_app} not found",
+                )
+
+            # Select the found app
+            await self.hass.services.async_call(
+                media_player.DOMAIN,
+                media_player.SERVICE_SELECT_SOURCE,
+                {
+                    ATTR_ENTITY_ID: self.state.entity_id,
+                    media_player.ATTR_INPUT_SOURCE: matched_app,
+                },
+                blocking=not self.config.should_report_state,
+                context=data.context,
+            )
+
+        elif command == COMMAND_APP_INSTALL:
+            # App installation is not supported through Home Assistant
+            raise SmartHomeError(
+                ERR_APP_LAUNCH_FAILED,
+                "App installation is not supported",
+            )
 
 
 @register_trait
