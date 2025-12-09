@@ -2565,14 +2565,19 @@ class VolumeTrait(_Trait):
         """Return volume query attributes."""
         response = {}
 
-        level = self.state.attributes.get(media_player.ATTR_MEDIA_VOLUME_LEVEL)
-        if level is not None:
-            # Convert 0.0-1.0 to 0-100
-            response["currentVolume"] = round(level * 100)
+        # If assumed_state is true (commandOnlyVolume), don't report current volume
+        # This ensures Google Home shows up/down controls instead of a percentage slider
+        is_command_only = self.state.attributes.get(ATTR_ASSUMED_STATE, False)
 
-        muted = self.state.attributes.get(media_player.ATTR_MEDIA_VOLUME_MUTED)
-        if muted is not None:
-            response["isMuted"] = bool(muted)
+        if not is_command_only:
+            level = self.state.attributes.get(media_player.ATTR_MEDIA_VOLUME_LEVEL)
+            if level is not None:
+                # Convert 0.0-1.0 to 0-100
+                response["currentVolume"] = round(level * 100)
+
+            muted = self.state.attributes.get(media_player.ATTR_MEDIA_VOLUME_MUTED)
+            if muted is not None:
+                response["isMuted"] = bool(muted)
 
         return response
 
