@@ -2448,10 +2448,11 @@ class OpenCloseTrait(_Trait):
             return response
 
         if domain in COVER_VALVE_DOMAINS:
+            # When state is unknown, report as closed (0% open)
+            # This is the safest default for garage doors
             if self.state.state == STATE_UNKNOWN:
-                raise SmartHomeError(
-                    ERR_NOT_SUPPORTED, "Querying state is not supported"
-                )
+                response["openPercent"] = 0
+                return response
 
             position = self.state.attributes.get(COVER_VALVE_CURRENT_POSITION[domain])
 
