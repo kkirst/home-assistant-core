@@ -2544,40 +2544,65 @@ class VolumeTrait(_Trait):
 
         return False
 
+    def _is_command_only(self) -> bool:
+        """Determine if this is a command-only volume device.
+
+        Command-only is true if:
+        1. assumed_state is explicitly set to True, OR
+        2. Device only supports VOLUME_STEP (not VOLUME_SET)
+
+        This affects how Google Home displays volume controls and whether
+        it tries to track/display current volume level.
+        """
+        features = self.state.attributes.get(ATTR_SUPPORTED_FEATURES, 0)
+        has_volume_set = bool(features & MediaPlayerEntityFeature.VOLUME_SET)
+        has_volume_step = bool(features & MediaPlayerEntityFeature.VOLUME_STEP)
+        assumed_state = self.state.attributes.get(ATTR_ASSUMED_STATE, False)
+
+        return assumed_state or (has_volume_step and not has_volume_set)
+
     def sync_attributes(self) -> dict[str, Any]:
         """Return volume attributes for a sync request."""
         features = self.state.attributes.get(ATTR_SUPPORTED_FEATURES, 0)
+        is_command_only = self._is_command_only()
+
+        # For command-only devices, use levelStepSize of 1 so each button press
+        # sends a single volume up/down command (not 10!)
+        level_step_size = 1 if is_command_only else 10
+
         return {
             "volumeCanMuteAndUnmute": bool(
                 features & MediaPlayerEntityFeature.VOLUME_MUTE
             ),
-            "commandOnlyVolume": self.state.attributes.get(ATTR_ASSUMED_STATE, False),
+            "commandOnlyVolume": is_command_only,
             # Volume amounts in SET_VOLUME and VOLUME_RELATIVE are on a scale
             # from 0 to this value.
             "volumeMaxLevel": 100,
             # Default change for queries like "Hey Google, volume up".
-            # 10% corresponds to the default behavior for the
-            # media_player.volume{up,down} services.
-            "levelStepSize": 10,
+            # For command-only devices, use 1 so each press = 1 IR command.
+            # For queryable devices, 10% matches HA's volume_up/down behavior.
+            "levelStepSize": level_step_size,
         }
 
     def query_attributes(self) -> dict[str, Any]:
         """Return volume query attributes."""
         response = {}
 
-        # If assumed_state is true (commandOnlyVolume), don't report current volume
-        # This ensures Google Home shows up/down controls instead of a percentage slider
-        is_command_only = self.state.attributes.get(ATTR_ASSUMED_STATE, False)
+        # If command-only, don't report current volume or mute state
+        # This prevents Google from tracking internal state that we can't update
+        if self._is_command_only():
+            # Return empty - Google will use its own internal tracking
+            # which resets appropriately for command-only devices
+            return response
 
-        if not is_command_only:
-            level = self.state.attributes.get(media_player.ATTR_MEDIA_VOLUME_LEVEL)
-            if level is not None:
-                # Convert 0.0-1.0 to 0-100
-                response["currentVolume"] = round(level * 100)
+        level = self.state.attributes.get(media_player.ATTR_MEDIA_VOLUME_LEVEL)
+        if level is not None:
+            # Convert 0.0-1.0 to 0-100
+            response["currentVolume"] = round(level * 100)
 
-            muted = self.state.attributes.get(media_player.ATTR_MEDIA_VOLUME_MUTED)
-            if muted is not None:
-                response["isMuted"] = bool(muted)
+        muted = self.state.attributes.get(media_player.ATTR_MEDIA_VOLUME_MUTED)
+        if muted is not None:
+            response["isMuted"] = bool(muted)
 
         return response
 
